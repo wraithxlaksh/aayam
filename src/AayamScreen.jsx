@@ -1,6 +1,6 @@
 import { BrainCircuit, Crosshair } from "lucide-react";
 
-export default function AayamScreen() {
+export default function AayamScreen({ onNavigateTripleThreat }) {
   return (
     <div className="min-h-screen bg-[#050516] text-white flex">
 
@@ -11,9 +11,12 @@ export default function AayamScreen() {
         </h2>
 
         <div className="space-y-3">
-          <div className="bg-purple-600/20 p-3 flex rounded-xl justify-center items-center p-2 ">
+          <button 
+            onClick={onNavigateTripleThreat}
+            className="w-full bg-purple-600/20 p-3 flex rounded-xl justify-center items-center hover:bg-purple-600/30 transition-all active:scale-95"
+          >
            <Crosshair size={24}/> <Crosshair size={20}/> <Crosshair size={18}/>  Triple Threat
-          </div>
+          </button>
           <div className="bg-white/5 p-3 flex justify-center items-center  rounded-xl p-2">
             <BrainCircuit/> Mind Sync
           </div>
