@@ -2,16 +2,31 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config({ path: '../.env' });
+
+console.log("ALL ENV:", process.env);
+// Validate required environment variables
+if (!process.env.MONGO_URI) {
+    console.error('❌ MONGO_URI not found in .env file. Please create a .env file in the project root with MONGO_URI=<your_mongo_connection_string>');
+    process.exit(1);
+}
+if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    console.error('❌ Upstash Redis environment variables not found. Please add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN to .env');
+    process.exit(1);
+}
+
 const Player = require('./models/Player');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+console.log(process.env.UPSTASH_REDIS_REST_URL)
+console.log("mongo url",process.env.MONGO_URI)
+console.log(process.env.UPSTASH_REDIS_REST_URL)
 const PORT = process.env.PORT || 5000;
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI)
+mongoose.connect(process.env.MONGO_URI,
+)
     .then(() => console.log('✅ Connected to MongoDB'))
     .catch(err => {
         console.error('❌ Could not connect to MongoDB. Full Error Details:');
