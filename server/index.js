@@ -1,12 +1,16 @@
 const express = require('express');
-const mongoose = require('mongoose');
+const { Pool } = require('pg');
 const cors = require('cors');
-require('dotenv').config({ path: '../.env' });
+const path = require('path');
+
+require('dotenv').config({
+  path: path.resolve(__dirname, '../.env')
+});
 
 console.log("ALL ENV:", process.env);
 // Validate required environment variables
-if (!process.env.MONGO_URI) {
-    console.error('❌ MONGO_URI not found in .env file. Please create a .env file in the project root with MONGO_URI=<your_mongo_connection_string>');
+if (!process.env.SUPABASE_URL) {
+    console.error('❌ SUPABASE_URL not found in .env file.');
     process.exit(1);
 }
 if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
@@ -14,22 +18,45 @@ if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN
     process.exit(1);
 }
 
-const Player = require('./models/Player');
-
 const app = express();
 app.use(cors());
 app.use(express.json());
-console.log(process.env.UPSTASH_REDIS_REST_URL)
-console.log("mongo url",process.env.MONGO_URI)
-console.log(process.env.UPSTASH_REDIS_REST_URL)
+console.log("Supabase URL present");
+console.log("Upstash URL:", process.env.UPSTASH_REDIS_REST_URL);
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI,
-)
-    .then(() => console.log('✅ Connected to MongoDB'))
+// Fix SUPABASE_URL if it doesn't have postgres(ql):// prefix
+let connString = process.env.SUPABASE_URL;
+if (!connString.startsWith('postgres://') && !connString.startsWith('postgresql://')) {
+    connString = 'postgresql://postgres:' + connString; 
+    console.warn("⚠️ Added postgresql:// prefix to connection string. Make sure format has user correctly set if using session pooler.");
+}
+
+// Connect to Postgres
+const pool = new Pool({
+    connectionString: connString,
+    ssl: { rejectUnauthorized: false }
+});
+
+pool.connect()
+    .then(async (client) => {
+        console.log('✅ Connected to Postgres (Supabase)');
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS players (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                "rollNumber" VARCHAR(255) UNIQUE NOT NULL,
+                "roomNumber" VARCHAR(255),
+                "totalScore" INTEGER DEFAULT 0,
+                stats JSONB DEFAULT '{"contexto": {"bestTime": null}, "grouping": {"bestTime": null}, "wordle": {"bestTime": null}}'::jsonb,
+                "lastUpdateTime" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('✅ Postgres tables verified');
+        client.release();
+    })
     .catch(err => {
-        console.error('❌ Could not connect to MongoDB. Full Error Details:');
+        console.error('❌ Could not connect to Postgres. Full Error Details:');
         console.error(err);
     });
 
@@ -79,9 +106,15 @@ app.post('/api/auth/login', async (req, res) => {
     if (!name || !rollNumber) return res.status(400).json({ error: "Missing identity fields." });
 
     try {
-        let player = await Player.findOne({ rollNumber });
+        let resDb = await pool.query('SELECT * FROM players WHERE "rollNumber" = $1', [rollNumber]);
+        let player = resDb.rows[0];
+        
         if (!player) {
-            player = await Player.create({ name, rollNumber });
+            resDb = await pool.query(
+                'INSERT INTO players (name, "rollNumber") VALUES ($1, $2) RETURNING *',
+                [name, rollNumber]
+            );
+            player = resDb.rows[0];
             console.log(`🆕 New competitor: ${name} (${rollNumber})`);
         }
         
@@ -93,6 +126,7 @@ app.post('/api/auth/login', async (req, res) => {
 
         res.json({ success: true, player });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: "Storage failure." });
     }
 });
@@ -119,18 +153,28 @@ app.post('/api/game/end', async (req, res) => {
 
         const solveTime = Math.floor((Date.now() - parseInt(startTimeStr)) / 1000); // in seconds
         
-        // Update MongoDB Best Time and Total Score
-        const player = await Player.findOne({ rollNumber });
+        // Update Postgres Best Time and Total Score
+        let resDb = await pool.query('SELECT * FROM players WHERE "rollNumber" = $1', [rollNumber]);
+        let player = resDb.rows[0];
+        
         if (player) {
-            const currentBest = player.stats[gameType]?.bestTime;
+            const stats = player.stats || { contexto: { bestTime: null }, grouping: { bestTime: null }, wordle: { bestTime: null } };
+            // Make sure gameType exists in stats
+            if (!stats[gameType]) stats[gameType] = { bestTime: null };
+            
+            const currentBest = stats[gameType].bestTime;
             if (!currentBest || solveTime < currentBest) {
-                player.stats[gameType].bestTime = solveTime;
+                stats[gameType].bestTime = solveTime;
             }
             player.totalScore += baseScore;
             // Time bonus calculation: Solve < 60s gives 50 bonus
             if (solveTime < 60) player.totalScore += 50;
             
-            await player.save();
+            // update db
+            await pool.query(
+                `UPDATE players SET "totalScore" = $1, stats = $2, "lastUpdateTime" = CURRENT_TIMESTAMP WHERE "rollNumber" = $3`,
+                [player.totalScore, JSON.stringify(stats), rollNumber]
+            );
 
             // Update Upstash Leaderboard
             await upstash('ZADD', 'leaderboard', player.totalScore.toString(), rollNumber);
@@ -162,9 +206,10 @@ app.get('/api/leaderboard', async (req, res) => {
             });
         }
         
-        // Fetch names from MongoDB for the display
+        // Fetch names from Postgres for the display
         const results = await Promise.all(rankings.map(async (item) => {
-            const player = await Player.findOne({ rollNumber: item.value });
+            const resDb = await pool.query('SELECT name FROM players WHERE "rollNumber" = $1', [item.value]);
+            const player = resDb.rows[0];
             return {
                 name: player ? player.name : "Unknown",
                 rollNumber: item.value,
@@ -182,17 +227,18 @@ app.get('/api/leaderboard', async (req, res) => {
 app.post('/api/score/sync', async (req, res) => {
     const { rollNumber, scoreChange } = req.body;
     try {
-        const player = await Player.findOneAndUpdate(
-            { rollNumber },
-            { $inc: { totalScore: scoreChange }, lastUpdateTime: Date.now() },
-            { new: true }
+        const resDb = await pool.query(
+            'UPDATE players SET "totalScore" = "totalScore" + $1, "lastUpdateTime" = CURRENT_TIMESTAMP WHERE "rollNumber" = $2 RETURNING *',
+            [scoreChange, rollNumber]
         );
+        const player = resDb.rows[0];
         
         if (player) {
             await upstash('ZADD', 'leaderboard', player.totalScore.toString(), rollNumber);
         }
         res.json({ success: true, player });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: "Sync failure." });
     }
 });
