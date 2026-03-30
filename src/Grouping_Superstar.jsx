@@ -1,248 +1,182 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
+import { LayoutGrid, Play, Timer, CheckCircle2, XCircle, Binary, AlertTriangle } from 'lucide-react';
 
 const CATEGORIES = [
-  {
-    name: "SUBATOMIC PARTICLES",
-    words: ["QUARK", "LEPTON", "BOSON", "NEUTRINO"],
-    color: "bg-cyan-500",
-    description: "The fundamental building blocks of matter."
-  },
-  {
-    name: "SCIENTIFIC LAWS",
-    words: ["NEWTON", "KEPLER", "SNELL", "OHM"],
-    color: "bg-blue-600",
-    description: "Fundamental principles governing classical physics."
-  },
-  {
-    name: "PHYSICAL CONSTANTS",
-    words: ["PLANCK", "BOLTZMANN", "HUBBLE", "FARADAY"],
-    color: "bg-fuchsia-600",
-    description: "Invariant values that define our universe."
-  },
-  {
-    name: "SI UNITS",
-    words: ["JOULE", "TESLA", "KELVIN", "PASCAL"],
-    color: "bg-emerald-600",
-    description: "Standard units of measurement in physics."
-  }
+  { name: "SUBATOMIC", words: ["QUARK", "LEPTON", "BOSON", "NEUTRINO"], color: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" },
+  { name: "LAWS", words: ["NEWTON", "KEPLER", "SNELL", "OHM"], color: "bg-blue-600/20 text-blue-400 border-blue-600/30" },
+  { name: "CONSTANTS", words: ["PLANCK", "BOLTZMANN", "HUBBLE", "FARADAY"], color: "bg-fuchsia-600/20 text-fuchsia-400 border-fuchsia-600/30" },
+  { name: "UNITS", words: ["JOULE", "TESLA", "KELVIN", "PASCAL"], color: "bg-emerald-600/20 text-emerald-400 border-emerald-600/30" }
 ];
 
 const INITIAL_WORDS = CATEGORIES.flatMap(cat => cat.words);
 
-const Grouping_Superstar = ({ onBack }) => {
+const Grouping_Superstar = ({ timeLeft, instance, syncScoreToServer, rollNumber, gameCountdown, isGameRunning, startInstanceTimer, stopInstanceTimer }) => {
   const [words, setWords] = useState([]);
   const [selected, setSelected] = useState([]);
   const [completed, setCompleted] = useState([]);
   const [mistakes, setMistakes] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(180);
-  const [isActive, setIsActive] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
   const [won, setWon] = useState(false);
-  const [shaking, setShaking] = useState(false);
-  
-  const timerRef = useRef(null);
+  const [gameOver, setGameOver] = useState(false);
+  const [timeout, setTimeoutState] = useState(false);
 
   useEffect(() => {
-    shuffleWords();
+    setWords([...INITIAL_WORDS].sort(() => Math.random() - 0.5));
   }, []);
 
+  // Monitor Countdown for Timeout
   useEffect(() => {
-    if (isActive && timeLeft > 0) {
-      timerRef.current = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
-      }, 1000);
-    } else if (timeLeft === 0) {
-      handleGameOver(false);
+    if (isGameRunning && gameCountdown <= 0 && !won) {
+      setTimeoutState(true);
+      stopInstanceTimer();
     }
-    return () => clearInterval(timerRef.current);
-  }, [isActive, timeLeft]);
+  }, [gameCountdown, isGameRunning, won]);
 
-  const shuffleWords = () => {
-    const shuffled = [...INITIAL_WORDS].sort(() => Math.random() - 0.5);
-    setWords(shuffled);
-  };
-
-  const startGame = () => {
-    setIsActive(true);
-    setGameOver(false);
-    setWon(false);
-    setMistakes(0);
-    setTimeLeft(180);
-    setCompleted([]);
-    setSelected([]);
-    shuffleWords();
-  };
-
-  const handleGameOver = (success) => {
-    setIsActive(false);
-    setGameOver(true);
-    setWon(success);
-    clearInterval(timerRef.current);
+  const handleStart = async () => {
+    if (timeout || gameOver) return;
+    try {
+      await fetch('http://localhost:5000/api/game/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rollNumber, gameType: 'grouping', instance }),
+      });
+    } catch (err) {}
+    startInstanceTimer();
   };
 
   const handleSelect = (word) => {
-    if (!isActive || gameOver || completed.some(cat => cat.words.includes(word))) return;
+    if (timeLeft <= 0 || won || gameOver || !isGameRunning || timeout) return;
+    if (completed.some(cat => cat.words.includes(word))) return;
 
     if (selected.includes(word)) {
       setSelected(selected.filter(w => w !== word));
-    } else {
-      if (selected.length < 4) {
-        const nextSelected = [...selected, word];
-        setSelected(nextSelected);
-        if (nextSelected.length === 4) {
-          checkGroup(nextSelected);
-        }
+    } else if (selected.length < 4) {
+      const nextSelected = [...selected, word];
+      setSelected(nextSelected);
+      if (nextSelected.length === 4) {
+        checkGroup(nextSelected);
       }
     }
   };
 
-  const checkGroup = (selectedWords) => {
-    const matchedCategory = CATEGORIES.find(cat => 
-      cat.words.every(w => selectedWords.includes(w))
-    );
-
+  const checkGroup = async (selectedWords) => {
+    const matchedCategory = CATEGORIES.find(cat => cat.words.every(w => selectedWords.includes(w)));
+    
     if (matchedCategory) {
-      setTimeout(() => {
-        const newCompleted = [...completed, matchedCategory];
-        setCompleted(newCompleted);
-        setSelected([]);
-        if (newCompleted.length === 4) {
-          handleGameOver(true);
+      const newCompleted = [...completed, matchedCategory];
+      setCompleted(newCompleted);
+      setSelected([]);
+      if (newCompleted.length === 4) {
+        setWon(true);
+        stopInstanceTimer();
+        try {
+          await fetch('http://localhost:5000/api/game/end', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ rollNumber, gameType: 'grouping', instance, baseScore: 150 }),
+          });
+        } catch (err) {
+          if (syncScoreToServer) syncScoreToServer(150);
         }
-      }, 300);
+      }
     } else {
-      setShaking(true);
       setMistakes(prev => prev + 1);
       setTimeout(() => {
-        setShaking(false);
         setSelected([]);
         if (mistakes + 1 >= 5) {
-          handleGameOver(false);
+            setGameOver(true);
+            stopInstanceTimer();
         }
       }, 500);
     }
   };
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white font-sans p-6 flex flex-col items-center">
-      <div className="w-full max-w-4xl flex justify-between items-center mb-12">
-        <button 
-          onClick={onBack}
-          className="text-gray-400 hover:text-cyan-400 transition-colors flex items-center gap-2 group"
-        >
-          <span className="group-hover:-translate-x-1 transition-transform">←</span> Back to Menu
-        </button>
-        <h1 className="text-4xl font-extrabold tracking-tighter bg-gradient-to-r from-blue-400 to-indigo-600 bg-clip-text text-transparent">
-          PHYSICS GROUPING
-        </h1>
-        <div className="flex flex-col items-end">
-          <div className={`text-2xl font-mono ${timeLeft < 30 ? 'text-red-500 animate-pulse' : 'text-cyan-400'}`}>
-            {formatTime(timeLeft)}
-          </div>
-          <div className="text-xs text-slate-500 uppercase tracking-widest mt-1">
-            Mistakes: <span className={mistakes >= 4 ? 'text-red-500' : 'text-slate-300'}>{mistakes}/5</span>
-          </div>
-        </div>
-      </div>
-
-      {!isActive && !gameOver && !won ? (
-        <div className="flex flex-col items-center justify-center flex-1 space-y-8">
-          <div className="text-center max-w-lg">
-            <p className="text-xl text-gray-300 leading-relaxed">
-              Find groups of four words that share a <span className="text-blue-400 font-bold">Physics Context</span>.
-              Careful: you only have 5 attempts.
-            </p>
-          </div>
-          <button 
-            onClick={startGame}
-            className="px-12 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full text-xl font-bold hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_rgba(59,130,246,0.3)]"
-          >
-            START EXPERIMENT
-          </button>
-        </div>
-      ) : (
-        <div className="w-full max-w-2xl flex flex-col gap-8">
-          {/* Completed Categories */}
-          <div className="flex flex-col gap-3">
-            {completed.map((cat, i) => (
-              <div 
-                key={i} 
-                className={`${cat.color} p-4 rounded-xl text-center animate-in slide-in-from-top duration-500`}
-              >
-                <h3 className="text-lg font-black tracking-widest text-white/90 mb-1">{cat.name}</h3>
-                <p className="text-sm font-medium text-white/70 uppercase">
-                  {cat.words.join(', ')}
-                </p>
-              </div>
-            ))}
-          </div>
-
-          {/* Word Grid */}
-          {!won && !gameOver && (
-            <div className={`grid grid-cols-4 gap-3 ${shaking ? 'animate-shake' : ''}`}>
-              {words.filter(w => !completed.some(c => c.words.includes(w))).map((word, i) => (
-                <button
-                  key={i}
-                  onClick={() => handleSelect(word)}
-                  className={`aspect-square sm:aspect-video flex items-center justify-center p-2 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 uppercase tracking-tighter
-                    ${selected.includes(word) 
-                      ? 'bg-slate-100 text-[#0a0a0f] border-2 border-white scale-95' 
-                      : 'bg-[#161625] text-gray-400 border-2 border-slate-800 hover:border-slate-500 hover:text-white'}`}
-                >
-                  {word}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Win/Loss Screen */}
-          {(won || gameOver) && (
-            <div className={`p-8 rounded-2xl text-center border animate-in zoom-in duration-500
-              ${won ? 'bg-green-900/30 border-green-500/50' : 'bg-red-900/30 border-red-500/50'}`}>
-              <h2 className={`text-3xl font-black mb-4 ${won ? 'text-green-400' : 'text-red-400'}`}>
-                {won ? 'EUREKA! EXPERIMENT SUCCESS' : 'SYSTEM CRITICAL FAILURE'}
-              </h2>
-              <p className="text-gray-300 mb-6 font-medium">
-                {won ? 'All physics groups identified correctly.' : 'Mistakes exceeded or safety protocol timed out.'}
-              </p>
-              <button 
-                onClick={startGame}
-                className={`px-8 py-3 rounded-xl font-bold transition-transform hover:scale-105 active:scale-95 text-white
-                ${won ? 'bg-green-600' : 'bg-red-600'}`}
-              >
-                RESTART EXPERIMENT
-              </button>
-            </div>
-          )}
-
-          {/* Remaining Attempts Visualization */}
-          {!won && !gameOver && (
-            <div className="flex justify-center items-center gap-2">
-              {[...Array(5)].map((_, i) => (
-                <div 
-                  key={i} 
-                  className={`w-3 h-3 rounded-full ${i < mistakes ? 'bg-red-500 border border-red-400 shadow-[0_0_10px_red]' : 'bg-slate-700'}`}
-                />
-              ))}
-            </div>
-          )}
+    <div className="w-full text-white font-sans flex flex-col gap-4 items-center h-full overflow-hidden relative select-none">
+      
+      {!isGameRunning && !timeout && !won && !gameOver && (
+        <div className="absolute inset-0 z-50 bg-[#0a0a1a]/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 rounded-3xl animate-in fade-in duration-300">
+           <div className="w-20 h-20 rounded-[2.5rem] bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center mb-8 shadow-2xl shadow-indigo-600/10">
+              <LayoutGrid className="text-indigo-400" size={40} />
+           </div>
+           <h3 className="text-2xl font-black italic tracking-widest text-white mb-2 uppercase italic tracking-tighter">PROTOCOL: GROUPING {instance}</h3>
+           <p className="text-slate-500 text-[10px] text-center max-w-[240px] leading-relaxed uppercase tracking-[0.3em] font-bold mb-10">
+              Categorical Analysis Required. 180s Time Window.
+           </p>
+           <button 
+             onClick={handleStart}
+             className="bg-white text-black px-12 py-5 rounded-[2rem] text-[12px] font-black uppercase tracking-[0.4em] flex items-center gap-4 hover:scale-105 transition-all shadow-2xl shadow-white/10"
+           >
+              <Play size={16} fill="currentColor" /> START
+           </button>
         </div>
       )}
 
-      <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-5px); }
-          75% { transform: translateX(5px); }
-        }
-        .animate-shake { animation: shake 0.2s ease-in-out infinite; }
-      `}</style>
+      {/* Header Info */}
+      <div className="flex justify-between items-center w-full px-2 shrink-0">
+        <div className="flex flex-col">
+           <h2 className="text-lg font-black italic tracking-widest text-indigo-400 uppercase leading-none">Grouping {instance}</h2>
+           <div className="flex gap-1.5 mt-2">
+             {[...Array(5)].map((_, i) => (
+                <div key={i} className={`w-4 h-1.5 rounded-full transition-all duration-500 ${i < mistakes ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'bg-slate-800'}`}></div>
+             ))}
+           </div>
+        </div>
+      </div>
+
+      {/* Categories area */}
+      <div className="grid grid-cols-1 gap-2 w-full shrink-0">
+        {completed.map((cat, idx) => (
+          <div key={idx} className={`${cat.color} p-4 rounded-2xl flex items-center justify-between border animate-in slide-in-from-top duration-500`}>
+             <div className="flex flex-col gap-0.5">
+                <span className="text-[10px] font-black tracking-[0.2em] italic uppercase">{cat.name}</span>
+                <span className="text-[8px] font-bold opacity-60 tracking-widest uppercase">{cat.words.join(' • ')}</span>
+             </div>
+             <CheckCircle2 size={16} className="opacity-80" />
+          </div>
+        ))}
+      </div>
+
+      {/* Word Grid */}
+      <div className="grid grid-cols-4 gap-2 w-full flex-1 overflow-hidden min-h-0">
+        {words.map((word, idx) => {
+          const isCompleted = completed.some(cat => cat.words.includes(word));
+          if (isCompleted) return null;
+          
+          const isSelected = selected.includes(word);
+          return (
+            <button
+              key={idx}
+              disabled={won || gameOver || !isGameRunning || timeout}
+              onClick={() => handleSelect(word)}
+              className={`aspect-square sm:aspect-auto sm:h-full rounded-2xl p-2 md:p-3 text-[9px] md:text-[11px] font-black tracking-widest transition-all duration-300 border uppercase
+                ${isSelected 
+                  ? 'bg-slate-50 text-black border-white shadow-xl scale-[0.98]' 
+                  : 'bg-slate-900 border-white/5 text-slate-500 hover:border-slate-500 hover:text-white'}`}
+            >
+              <div className="text-center hyphens-auto">{word}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {(won || gameOver || timeout) && (
+        <div className={`absolute inset-0 z-[60] backdrop-blur-md flex items-center justify-center rounded-3xl animate-in zoom-in duration-300 
+          ${won ? 'bg-emerald-950/20' : (timeout ? 'bg-red-950/80' : 'bg-red-950/20')}`}>
+           <div className={`bg-[#0a0a1a] border p-10 rounded-[2.5rem] text-center shadow-3xl flex flex-col items-center scale-105 
+             ${won ? 'border-emerald-500/20 shadow-emerald-500/10' : 'border-red-500/20 shadow-red-500/10'}`}>
+              <div className={`w-20 h-20 rounded-[2rem] flex items-center justify-center mb-6 border 
+                ${won ? 'bg-emerald-500/20 border-emerald-500/30' : 'bg-red-500/20 border-red-500/30'}`}>
+                 {won ? <CheckCircle2 className="text-emerald-400" size={40} /> : (timeout ? <AlertTriangle className="text-red-500" size={40} /> : <XCircle className="text-red-400" size={40} />)}
+              </div>
+              <h3 className={`text-2xl font-black italic tracking-widest uppercase ${won ? 'text-emerald-400' : 'text-red-400'}`}>
+                {won ? 'SYNCHRONIZED' : (timeout ? 'SYSTEM TIMEOUT' : 'PROTOCOL NULL')}
+              </h3>
+              <p className="text-slate-500 text-[10px] mt-4 uppercase tracking-[0.3em] font-bold max-w-[200px] leading-relaxed">
+                {won ? `Data categorized. Window sealed.` : (timeout ? 'Access window expired. Sector locked.' : 'System overload. Stability lost.')}
+              </p>
+           </div>
+        </div>
+      )}
     </div>
   );
 };
