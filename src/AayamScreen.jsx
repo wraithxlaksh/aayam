@@ -1,102 +1,98 @@
 import React, { useState, useEffect } from "react";
 import { BrainCircuit, Crosshair, Trophy, Timer, LayoutGrid, Terminal, Type, LogOut, Binary, Menu, X } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
 import Contexto_Superstar from "./Contexto_Superstar";
 import Grouping_Superstar from "./Grouping_Superstar";
 import Wordle_Superstar from "./Wordle_Superstar";
 
-export default function AayamScreen({ activeMode, setActiveMode, activeGame, setActiveGame, activeInstance, setActiveInstance, timeLeft, setTimeLeft, timerActive, player, onLogout, onGameStart }) {
+export default function AayamScreen({ 
+  activeMode, setActiveMode, 
+  activeGame, setActiveGame, 
+  activeInstance, setActiveInstance,
+  timeLeft, setTimeLeft, timerActive, player, onLogout, onGameStart 
+}) {
+  const { id: roundId } = useParams();
+  const navigate = useNavigate();
+  
   const [leaderboard, setLeaderboard] = useState([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   
-  // PER-GAME TIMERS: State for tracking each instance's 3-minute window
-  const [gameTimers, setGameTimers] = useState({}); // { 'contexto-1': 180, ... }
-  const [runningTimers, setRunningTimers] = useState(new Set());
+  const [isLive, setIsLive] = useState(true); // default true for round
+  const [isQualified, setIsQualified] = useState(false);
 
-  // LEADERBOARD & TICKER
+  // LEADERBOARD & SSE LIVE STATE
   useEffect(() => {
-    const fetchLeaderboard = async () => {
-      try {
-        const response = await fetch('http://localhost:5000/api/leaderboard');
-        if (response.ok) {
-          const data = await response.json();
-          setLeaderboard(data);
+    if (!roundId) return;
+    const eventSource = new EventSource(`http://localhost:5000/api/events/${roundId}`);
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'STATE_UPDATE') {
+        setIsLive(data.payload.isLive);
+      } else if (data.type === 'ROUND_START') {
+        // Handle global start event if needed
+        const roundData = data.payload;
+        if (roundData.status === 'LIVE') {
+           const timeRemaining = Math.max(0, Math.floor((roundData.end_time - Date.now()) / 1000));
+           setTimeLeft(timeRemaining);
+           setIsLive(true);
+        } else {
+           setIsLive(false);
         }
-      } catch (err) {
-        console.warn("Leaderboard sync failed (Backend Offline)");
+      } else if (data.type === 'LEADERBOARD') {
+        setLeaderboard(data.payload);
+        const myRank = data.payload.find(p => p.rollNumber === player?.rollNumber);
+        if (myRank) {
+           setIsQualified(myRank.is_qualified);
+        }
       }
     };
-
-    fetchLeaderboard();
-    const interval = setInterval(fetchLeaderboard, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Per-game Timer Tick Logic
-  useEffect(() => {
-    let interval = setInterval(() => {
-      setGameTimers(prev => {
-        const next = { ...prev };
-        let changed = false;
-        runningTimers.forEach(id => {
-          if (next[id] > 0) {
-            next[id] -= 1;
-            changed = true;
-          } else if (next[id] === 0) {
-            // Trigger auto-stop handled in component, or we can remove from set
-            runningTimers.delete(id);
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [runningTimers]);
+    return () => eventSource.close();
+  }, [player, roundId, setTimeLeft]);
 
   const formatTime = (seconds) => {
-    if (seconds <= 0) return "0:00";
+    if (seconds <= 0) return "00:00";
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const syncScoreToServer = async (scoreChange) => {
+  useEffect(() => {
+    let interval = null;
+    if (isLive && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft(prev => {
+           if (prev <= 1) {
+              clearInterval(interval);
+              setIsLive(false);
+              return 0;
+           }
+           return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isLive, timeLeft, setTimeLeft]);
+
+  const syncScoreToServer = async (gameType, payload) => {
     if (!player) return;
     try {
-      await fetch('http://localhost:5000/api/score/sync', {
+      await fetch(`http://localhost:5000/api/game/${roundId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rollNumber: player.rollNumber, scoreChange }),
+        body: JSON.stringify({ rollNumber: player.rollNumber, gameType, payload }),
       });
     } catch (err) { }
   };
 
-  const startInstanceTimer = (id) => {
-    setGameTimers(prev => ({ ...prev, [id]: 180 }));
-    setRunningTimers(prev => new Set(prev).add(id));
-    if (onGameStart) onGameStart();
-  };
-
-  const stopInstanceTimer = (id) => {
-    setRunningTimers(prev => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
-
-  const activeTimerId = `${activeGame}-${activeInstance}`;
   const gameProps = { 
     timeLeft, 
     setTimeLeft, 
     timerActive, 
     rollNumber: player?.rollNumber, 
     syncScoreToServer, 
-    gameCountdown: gameTimers[activeTimerId] ?? 180,
-    isGameRunning: runningTimers.has(activeTimerId),
-    startInstanceTimer: () => startInstanceTimer(activeTimerId),
-    stopInstanceTimer: () => stopInstanceTimer(activeTimerId)
+    onGameStart,
+    roundId
   };
 
   return (
@@ -109,19 +105,6 @@ export default function AayamScreen({ activeMode, setActiveMode, activeGame, set
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-500 p-1"><X size={16} /></button>
         </div>
 
-        {/* SITE-LEFT GAME TIMER (3-MINUTE COUNTDOWN) */}
-        <div className="mb-2 px-6 py-8 bg-gradient-to-br from-red-600/10 to-transparent border-b border-white/5 flex flex-col items-center justify-center relative">
-            <div className="flex items-center gap-2 text-red-500/80 text-[8px] font-black tracking-[0.4em] uppercase mb-1">
-               <Timer size={10} />
-               <span>PROTOCOL CLOCK</span>
-            </div>
-            <div className={`text-6xl font-black italic tracking-tighter tabular-nums drop-shadow-[0_0_20px_rgba(239,68,68,0.3)] transition-all ${gameTimers[activeTimerId] < 30 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
-               {formatTime(gameTimers[activeTimerId] ?? 180)}
-            </div>
-            <div className="text-[7px] text-slate-700 font-bold uppercase tracking-[0.2em] mt-1">{activeGame}:{activeInstance} WINDOW</div>
-            <div className="absolute bottom-0 left-0 h-0.5 bg-red-500 transition-all duration-1000 opacity-20" style={{ width: `${((gameTimers[activeTimerId] ?? 180) / 180) * 100}%` }}></div>
-        </div>
-
         {/* MISSION TIMER (GLOBAL 10 MIN) */}
         <div className="mb-6 px-6 py-4 flex flex-col items-center border-b border-white/5 opacity-50">
             <div className="text-[7px] text-slate-500 font-black uppercase tracking-widest mb-1">GLOBAL SESSION</div>
@@ -131,24 +114,14 @@ export default function AayamScreen({ activeMode, setActiveMode, activeGame, set
         </div>
 
         <nav className="flex-1 px-3 space-y-1.5 overflow-y-auto">
-          <button 
-            onClick={() => { setActiveMode('triple-threat'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 p-3.5 rounded-xl transition-all group ${activeMode === 'triple-threat' ? 'bg-indigo-600 shadow-lg text-white' : 'hover:bg-white/5 text-slate-500 font-medium'}`}
-          >
+          <div className="bg-indigo-600 shadow-lg text-white w-full flex items-center gap-3 p-3.5 rounded-xl transition-all group cursor-default">
             <Crosshair size={16} />
-            <span className="text-xs font-black uppercase tracking-widest">Triple Threat</span>
-          </button>
-          <button 
-            onClick={() => { setActiveMode('mind-sync'); setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 p-3.5 rounded-xl transition-all group ${activeMode === 'mind-sync' ? 'bg-fuchsia-600 shadow-lg text-white' : 'hover:bg-white/5 text-slate-500 font-medium'}`}
-          >
-            <BrainCircuit size={16} />
-            <span className="text-xs font-black uppercase tracking-widest">Mind Sync</span>
-          </button>
+            <span className="text-xs font-black uppercase tracking-widest">Dimension {roundId}</span>
+          </div>
         </nav>
 
         <div className="p-4 flex flex-col items-center gap-1.5 opacity-30 mt-auto border-t border-white/5">
-           <button onClick={onLogout} className="flex items-center gap-2 text-[10px] font-black text-slate-500 hover:text-red-500 transition-colors py-2 uppercase tracking-widest"><LogOut size={12} /> Abort Mission</button>
+           <button onClick={() => navigate('/rounds')} className="flex items-center gap-2 text-[10px] font-black text-slate-500 hover:text-red-500 transition-colors py-2 uppercase tracking-widest"><LogOut size={12} /> Leave Round</button>
         </div>
       </aside>
 
@@ -161,7 +134,7 @@ export default function AayamScreen({ activeMode, setActiveMode, activeGame, set
              <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden text-indigo-400 p-1"><Menu size={20} /></button>
              <span className="text-[10px] font-black italic tracking-tighter text-indigo-400 hidden sm:inline">SECURE_LINK</span>
              <span className="text-slate-800 text-[10px] hidden sm:inline">/</span>
-             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[100px]">{activeMode.replace('-', ' ')}</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate max-w-[100px]">TRIPLE THREAT</span>
           </div>
           <div className="flex items-center gap-3">
              <div className="hidden sm:flex flex-col items-end pr-2 border-r border-white/5 mr-1">
@@ -173,65 +146,61 @@ export default function AayamScreen({ activeMode, setActiveMode, activeGame, set
           </div>
         </header>
 
-        {activeMode === 'triple-threat' && (
-          <div className="px-4 md:px-6 pt-4 md:pt-6 flex flex-col sm:flex-row items-center justify-center gap-4 z-10 shrink-0">
-            <div className="flex flex-wrap justify-center gap-2 bg-[#08081a] p-1 rounded-xl border border-white/5">
-              {['contexto', 'grouping', 'wordle'].map(game => (
-                <button 
-                  key={game}
-                  onClick={() => setActiveGame(game)}
-                  className={`px-4 py-1.5 rounded-lg text-[9px] font-black flex items-center gap-2 transition-all ${activeGame === game ? 'bg-white text-black shadow-lg shadow-white/10' : 'text-slate-500 hover:text-white'}`}
-                >
-                  {game === 'contexto' && <Terminal size={12} />}
-                  {game === 'grouping' && <LayoutGrid size={12} />}
-                  {game === 'wordle' && <Type size={12} />}
-                  {game.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-1 bg-slate-950 border border-white/5 p-1 rounded-xl">
-              {[1, 2].map(num => (
-                <button 
-                  key={num}
-                  onClick={() => setActiveInstance(num)}
-                  className={`w-8 h-6 rounded-md text-[9px] font-black transition-all ${activeInstance === num ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-700 hover:text-slate-300'}`}
-                >
-                  {num}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* MAIN GAMEPLAY CONTAINER */}
-        <div className="flex-1 flex flex-col items-center justify-center px-4 md:px-8 pb-4 md:pb-8 z-10 w-full overflow-hidden">
-          <div className="w-full max-w-2xl bg-[#0a0a1a]/80 backdrop-blur-2xl rounded-3xl border border-white/5 p-4 md:p-8 shadow-2xl relative flex flex-col justify-start h-auto max-h-full overflow-hidden self-center border-t-indigo-500/15">
-             <div className="w-full h-full flex flex-col overflow-hidden">
-                {activeMode === 'triple-threat' ? (
-                   <>
-                      <div className={activeGame === 'contexto' ? 'w-full h-full' : 'hidden'}>
-                        <div className={activeInstance === 1 ? 'w-full h-full' : 'hidden'}><Contexto_Superstar {...gameProps} instance={1} /></div>
-                        <div className={activeInstance === 2 ? 'w-full h-full' : 'hidden'}><Contexto_Superstar {...gameProps} instance={2} /></div>
-                      </div>
-                      <div className={activeGame === 'grouping' ? 'w-full h-full' : 'hidden'}>
-                        <div className={activeInstance === 1 ? 'w-full h-full' : 'hidden'}><Grouping_Superstar {...gameProps} instance={1} /></div>
-                        <div className={activeInstance === 2 ? 'w-full h-full' : 'hidden'}><Grouping_Superstar {...gameProps} instance={2} /></div>
-                      </div>
-                      <div className={activeGame === 'wordle' ? 'w-full h-full' : 'hidden'}>
-                        <div className={activeInstance === 1 ? 'w-full h-full' : 'hidden'}><Wordle_Superstar {...gameProps} instance={1} /></div>
-                        <div className={activeInstance === 2 ? 'w-full h-full' : 'hidden'}><Wordle_Superstar {...gameProps} instance={2} /></div>
-                      </div>
-                   </>
-                ) : (
-                   <div className="py-12 md:py-20 text-center flex flex-col justify-center items-center">
-                      <div className="w-16 h-16 rounded-3xl bg-fuchsia-600/10 border border-fuchsia-500/20 flex items-center justify-center mb-6 shadow-2xl shadow-fuchsia-600/5">
-                         <BrainCircuit size={40} className="text-fuchsia-500 opacity-50 animate-pulse" />
-                      </div>
-                      <h2 className="text-xl font-black italic tracking-widest text-white uppercase italic">MIND SYNC</h2>
-                      <p className="text-slate-600 text-[9px] mt-2 uppercase tracking-[0.4em] font-medium italic">Protocol Pending Initialization</p>
-                   </div>
-                )}
+        <div className="flex-1 flex flex-col items-center justify-center px-4 md:px-8 pb-4 md:pb-8 z-10 w-full overflow-hidden relative">
+          
+          {!isLive && (
+             <div className="absolute inset-0 z-50 bg-[#02020a]/80 backdrop-blur-md flex flex-col items-center justify-center pointer-events-auto rounded-3xl m-4 md:m-8 border border-white/5">
+                <div className="w-20 h-20 rounded-full bg-red-600/10 border border-red-500/30 flex items-center justify-center mb-8 shadow-[0_0_40px_rgba(239,68,68,0.2)]">
+                   <Timer size={40} className="text-red-500 animate-pulse" />
+                </div>
+                <h2 className="text-2xl md:text-3xl font-black uppercase tracking-[0.2em] text-white italic drop-shadow-[0_2px_10px_rgba(255,255,255,0.2)]">MATCH LOCKED</h2>
+                <p className="text-[10px] md:text-xs font-black text-slate-500 uppercase tracking-[0.5em] mt-4 italic text-center px-6">Awaiting Admin Authorization to Proceed.</p>
              </div>
+          )}
+
+          <div className={`w-full max-w-5xl mx-auto h-[80vh] flex flex-col pt-8 z-10 transition-all duration-500 ${!isLive ? 'opacity-20 blur-[2px] pointer-events-none scale-[0.98]' : 'scale-100 opacity-100'}`}>
+              
+              {/* Top Navigation Tabs */}
+              <div className="flex bg-[#0a0a1a]/80 backdrop-blur-2xl rounded-t-3xl border border-white/5 border-b-0 overflow-hidden">
+                 {['contexto', 'wordle', 'grouping'].map(game => (
+                    <button 
+                      key={game}
+                      onClick={() => setActiveGame(game)}
+                      className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${activeGame === game ? (
+                        game === 'contexto' ? 'bg-indigo-500/20 text-indigo-400 border-b-2 border-indigo-500' :
+                        game === 'wordle' ? 'bg-orange-500/20 text-orange-400 border-b-2 border-orange-500' :
+                        'bg-fuchsia-500/20 text-fuchsia-400 border-b-2 border-fuchsia-500'
+                      ) : 'text-slate-500 hover:bg-white/5'}`}
+                    >
+                       {game}
+                    </button>
+                 ))}
+              </div>
+
+              {/* Instance Selector Tabs */}
+              <div className="flex bg-[#050510]/50 backdrop-blur-md border-x border-white/5 border-b border-white/5">
+                 {[1, 2].map(inst => (
+                    <button 
+                      key={inst}
+                      onClick={() => setActiveInstance(inst)}
+                      className={`flex-1 py-2 text-[9px] font-bold uppercase tracking-widest transition-all ${activeInstance === inst ? 'bg-white/10 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                    >
+                       Instance {inst}
+                    </button>
+                 ))}
+              </div>
+
+              {/* Active Game Window */}
+              <div className="flex-1 bg-[#0a0a1a]/80 backdrop-blur-xl rounded-b-3xl border border-white/5 border-t-0 shadow-2xl relative overflow-hidden p-4 md:p-8">
+                 {activeGame === 'contexto' && <Contexto_Superstar key={`contexto-${activeInstance}`}  {...gameProps} instance={activeInstance} />}
+                  {activeGame === 'wordle' && (<Wordle_Superstar  key={`wordle-${activeInstance}`}  {...gameProps}  instance={activeInstance} />)}
+                 {activeGame === 'grouping' && <Grouping_Superstar 
+  key={`grouping-${activeInstance}`} 
+  {...gameProps} 
+  instance={activeInstance} 
+/>}
+              </div>
           </div>
         </div>
       </main>

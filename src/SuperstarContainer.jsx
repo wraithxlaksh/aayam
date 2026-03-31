@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import AayamScreen from './AayamScreen';
 import LoginScreen from './LoginScreen';
+import AdminScreen from './AdminScreen';
+import RoundsScreen from './RoundsScreen';
 
 const SuperstarContainer = () => {
   const [player, setPlayer] = useState(null);
@@ -9,32 +12,45 @@ const SuperstarContainer = () => {
   const [activeInstance, setActiveInstance] = useState(1); // 1 or 2
   const [timeLeft, setTimeLeft] = useState(600); // 10 minutes
   const [timerActive, setTimerActive] = useState(false);
+  const [globalTimerStarted, setGlobalTimerStarted] = useState(false);
 
-  // AUTH: Ensure login is always shown first
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // AUTH: Token Verification on Mount
   useEffect(() => {
-    // Reset to standby on mount (as per request)
-    localStorage.removeItem('aayam_player');
-    setPlayer(null);
-  }, []);
-
-  const fetchSessionTimer = async (rollNumber) => {
-    try {
-      const response = await fetch(`http://localhost:5000/api/session/timer/${rollNumber}`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.timeLeft !== null) {
-          setTimeLeft(data.timeLeft);
+    const initAuth = async () => {
+      const stored = localStorage.getItem('aayam_player');
+      if (stored) {
+        const playerData = JSON.parse(stored);
+        if (playerData.isAdmin) {
+           setPlayer(playerData);
+           return;
+        }
+        
+        try {
+          const res = await fetch('http://localhost:5000/api/auth/verify', {
+            headers: { 'Authorization': `Bearer ${playerData.token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setPlayer({ ...data.player, token: playerData.token });
+          } else {
+            localStorage.removeItem('aayam_player');
+            setPlayer(null);
+          }
+        } catch (err) {
+            // If offline, keep local state
+            setPlayer(playerData);
         }
       }
-    } catch (err) {
-      console.warn("Offline: Using local timer.");
-    }
-  };
+    };
+    initAuth();
+  }, []);
 
   const handleLogin = (playerData) => {
     setPlayer(playerData);
     localStorage.setItem('aayam_player', JSON.stringify(playerData));
-    fetchSessionTimer(playerData.rollNumber);
   };
 
   const handleLogout = () => {
@@ -43,61 +59,49 @@ const SuperstarContainer = () => {
     setTimeLeft(600); // Reset for next user
   };
 
-  const [globalTimerStarted, setGlobalTimerStarted] = useState(false);
-
-  useEffect(() => {
-    let interval = null;
-    if (player && activeMode === 'triple-threat' && globalTimerStarted && timeLeft > 0) {
-      setTimerActive(true);
-      interval = setInterval(() => {
-        setTimeLeft((prev) => {
-           const next = prev - 1;
-           // Heartbeat to sync timer to Redis
-           if (next % 5 === 0) {
-              syncTimerToServer(player.rollNumber, next);
-           }
-           return next;
-        });
-      }, 1000);
-    } else {
-      setTimerActive(false);
-      clearInterval(interval);
-    }
-    return () => clearInterval(interval);
-  }, [player, activeMode, timeLeft, globalTimerStarted]);
-
-  const syncTimerToServer = async (rollNumber, time) => {
-    try {
-      await fetch('http://localhost:5000/api/session/timer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rollNumber, timeLeft: time }),
-      });
-    } catch (err) {
-      // Background sync fail is fine for dev
-    }
-  };
-
-  if (!player) {
-    return <LoginScreen onLogin={handleLogin} />;
+  // Routing logic
+  if (!player && location.pathname !== '/login') {
+    return <Navigate to="/login" replace />;
   }
 
   return (
-    <div className="superstar-app-root h-screen overflow-hidden">
-      <AayamScreen 
-        activeMode={activeMode}
-        setActiveMode={setActiveMode}
-        activeGame={activeGame}
-        setActiveGame={setActiveGame}
-        activeInstance={activeInstance}
-        setActiveInstance={setActiveInstance}
-        timeLeft={timeLeft}
-        setTimeLeft={setTimeLeft}
-        timerActive={timerActive}
-        player={player}
-        onLogout={handleLogout}
-        onGameStart={() => setGlobalTimerStarted(true)}
-      />
+    <div className="superstar-app-root min-h-screen w-full bg-[#03030f]">
+      <Routes>
+        <Route path="/login" element={
+          player ? <Navigate to={player.isAdmin ? "/admin" : "/rounds"} replace /> : <LoginScreen onLogin={handleLogin} />
+        } />
+        
+        <Route path="/admin/*" element={
+          player?.isAdmin ? <AdminScreen onLogout={handleLogout} /> : <Navigate to="/login" replace />
+        } />
+
+        <Route path="/rounds" element={
+          player && !player.isAdmin ? <RoundsScreen player={player} onLogout={handleLogout} /> : <Navigate to="/login" replace />
+        } />
+
+        <Route path="/round/:id/play" element={
+          player && !player.isAdmin ? (
+            <AayamScreen 
+              activeMode={activeMode}
+              setActiveMode={setActiveMode}
+              activeGame={activeGame}
+              setActiveGame={setActiveGame}
+              activeInstance={activeInstance}
+              setActiveInstance={setActiveInstance}
+              timeLeft={timeLeft}
+              setTimeLeft={setTimeLeft}
+              timerActive={timerActive}
+              player={player}
+              onLogout={handleLogout}
+              onGameStart={() => setGlobalTimerStarted(true)}
+            />
+          ) : <Navigate to="/login" replace />
+        } />
+
+        <Route path="/" element={
+           player ? <Navigate to={player.isAdmin ? "/admin" : "/rounds"} replace /> : <Navigate to="/login" replace />
+        } />
+      </Routes>
     </div>
   );
 };

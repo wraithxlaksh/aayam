@@ -2,46 +2,63 @@ import React, { useState } from 'react';
 import { User, Hash, Rocket, ChevronRight, Binary, ShieldCheck } from 'lucide-react';
 
 const LoginScreen = ({ onLogin }) => {
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'admin'
   const [name, setName] = useState('');
   const [rollNumber, setRollNumber] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [offlineMode, setOfflineMode] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !rollNumber) {
-      setError('Identity verification required.');
-      return;
+    if (authMode === 'admin') {
+      if (!password) { setError('Admin password required.'); return; }
+    } else if (authMode === 'login') {
+      if (!rollNumber || !password) { setError('Roll Number and Password required.'); return; }
+    } else {
+      if (!name || !rollNumber || !password) { setError('All fields required for signup.'); return; }
     }
     
     setLoading(true);
     setError('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, rollNumber }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        onLogin(data.player);
+      if (authMode === 'admin') {
+          const response = await fetch('http://localhost:5000/api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+          });
+          if (response.ok) {
+             onLogin({ isAdmin: true, token: password });
+          } else {
+             setError('Invalid Admin Password.');
+          }
       } else {
-        setError('Database Offline. Persistence unavailable.');
-        setOfflineMode(true);
+          const endpoint = authMode === 'login' ? 'login' : 'signup';
+          const payload = authMode === 'login' 
+                ? { rollNumber, password } 
+                : { name, rollNumber, password };
+                
+          const response = await fetch(`http://localhost:5000/api/auth/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            onLogin({ ...data.player, token: data.token });
+          } else {
+            const errorData = await response.json().catch(() => null);
+            setError(errorData?.error || 'Authentication Failed.');
+          }
       }
     } catch (err) {
       setError('Connection link severed. Is the server active?');
-      setOfflineMode(true);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleOfflineProceed = () => {
-    onLogin({ name, rollNumber, isOffline: true });
   };
 
   return (
@@ -62,8 +79,15 @@ const LoginScreen = ({ onLogin }) => {
           <p className="text-slate-500 text-[9px] font-bold uppercase tracking-[0.4em] italic mt-2">Authentication Protocol 4.2</p>
         </header>
 
+        <div className="flex justify-center gap-2 mb-8 bg-white/5 p-1 rounded-xl">
+            <button type="button" onClick={() => {setAuthMode('login'); setError('');}} className={`flex-1 text-[10px] uppercase font-black tracking-widest py-2.5 rounded-lg transition-all ${authMode === 'login' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Login</button>
+            <button type="button" onClick={() => {setAuthMode('signup'); setError('');}} className={`flex-1 text-[10px] uppercase font-black tracking-widest py-2.5 rounded-lg transition-all ${authMode === 'signup' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Signup</button>
+            <button type="button" onClick={() => {setAuthMode('admin'); setError('');}} className={`flex-1 text-[10px] uppercase font-black tracking-widest py-2.5 rounded-lg transition-all ${authMode === 'admin' ? 'bg-fuchsia-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>Admin</button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2">
+          {authMode === 'signup' && (
+          <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
             <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">Name</label>
             <div className="relative group">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-500 transition-colors">
@@ -78,8 +102,10 @@ const LoginScreen = ({ onLogin }) => {
               />
             </div>
           </div>
+          )}
 
-          <div className="space-y-2">
+          {authMode !== 'admin' && (
+          <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
             <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">Roll Number</label>
             <div className="relative group">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-500 transition-colors">
@@ -94,21 +120,29 @@ const LoginScreen = ({ onLogin }) => {
               />
             </div>
           </div>
+          )}
+
+          <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+            <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">Password</label>
+            <div className="relative group">
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-indigo-500 transition-colors">
+                 <Binary size={16} />
+              </div>
+              <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Secure Password"
+                className="w-full bg-white/5 border border-white/5 rounded-2xl py-3.5 pl-11 pr-6 text-sm outline-none focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 transition-all text-white font-medium"
+              />
+            </div>
+          </div>
 
           {error && (
             <div className="flex flex-col gap-2.5">
               <div className="p-3 bg-red-900/10 border border-red-500/20 rounded-xl text-center">
                 <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em] animate-pulse italic">{error}</p>
               </div>
-              {offlineMode && (
-                <button 
-                  type="button"
-                  onClick={handleOfflineProceed}
-                  className="w-full bg-slate-900/50 hover:bg-slate-800 border border-white/10 py-3 rounded-xl text-slate-500 text-[8px] font-black uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-2 hover:text-white"
-                >
-                  <Hash size={12} /> BYPASS TO LOCAL GUEST MODE
-                </button>
-              )}
             </div>
           )}
 
