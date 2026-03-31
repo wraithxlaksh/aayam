@@ -26,7 +26,11 @@ if (!process.env.ADMIN_PASSWORD) {
 }
 
 const app = express();
-app.use(cors());
+app.use(cors(
+    {
+        origin: "*",
+    }
+));
 app.use(express.json());
 console.log("Supabase URL present");
 console.log("Upstash URL:", process.env.UPSTASH_REDIS_REST_URL);
