@@ -15,7 +15,7 @@ const AdminScreen = ({ onLogout }) => {
   const fetchRounds = async () => {
     const token = JSON.parse(localStorage.getItem('aayam_player'))?.token;
     try {
-      const res = await fetch('http://localhost:5000/api/admin/rounds', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/admin/rounds`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: token })
@@ -28,7 +28,7 @@ const AdminScreen = ({ onLogout }) => {
   };
 
   useEffect(() => {
-    const eventSource = new EventSource('http://localhost:5000/api/stream');
+    const eventSource = new EventSource(`${import.meta.env.VITE_API_URL}/api/stream`);
     
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -55,7 +55,7 @@ const AdminScreen = ({ onLogout }) => {
     if (!newRoundName.trim()) return;
     const token = JSON.parse(localStorage.getItem('aayam_player'))?.token;
     try {
-      const res = await fetch('http://localhost:5000/api/admin/rounds/create', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/admin/rounds/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: token, name: newRoundName, dimension_type: dimensionType, max_players: dimensionType === 'TRIPLE_THREAT' ? 8 : Number(maxPlayers) })
@@ -73,7 +73,7 @@ const AdminScreen = ({ onLogout }) => {
   const handleStartRound = async (roundId) => {
     const token = JSON.parse(localStorage.getItem('aayam_player'))?.token;
     try {
-      const res = await fetch(`http://localhost:5000/api/admin/rounds/${roundId}/start`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/admin/rounds/${roundId}/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: token })
@@ -90,7 +90,7 @@ const AdminScreen = ({ onLogout }) => {
   const handleQualify = async () => {
     const token = JSON.parse(localStorage.getItem('aayam_player'))?.token;
     try {
-      await fetch('http://localhost:5000/api/admin/qualify', {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/admin/qualify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: token, count: qualifyCount })

@@ -15,7 +15,7 @@ const RoundsScreen = ({ player, onLogout }) => {
 
   const fetchRounds = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/rounds?rollNumber=${player.rollNumber}`);
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/rounds?rollNumber=${player.rollNumber}`);
       if (res.ok) {
         const data = await res.json();
         setRounds(data.rounds || []);
@@ -25,7 +25,7 @@ const RoundsScreen = ({ player, onLogout }) => {
 
   const handleEnroll = async (roundId) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/rounds/enroll/${roundId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/rounds/enroll/${roundId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rollNumber: player.rollNumber })

@@ -92,7 +92,7 @@ const [solution, setSolution] = useState('');
   useEffect(() => {
     const loadState = async () => {
       try {
-        const res = await fetch(`http://localhost:5000/api/progress/load/${rollNumber}/${gameId}`);
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/progress/load/${rollNumber}/${gameId}`);
         if (res.ok) {
            const data = await res.json();
            if (data.progress) {
@@ -113,7 +113,7 @@ const [solution, setSolution] = useState('');
     if (!rollNumber || (!guesses.length && !won && !timeout)) return;
     const saveState = async () => {
       try {
-        await fetch('http://localhost:5000/api/progress/save', {
+        await fetch(`${import.meta.env.VITE_API_URL}/api/progress/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ rollNumber, gameId, progress: { guesses, won, timeout } })
@@ -125,7 +125,7 @@ const [solution, setSolution] = useState('');
 
   const handleStart = async () => {
     try {
-      await fetch('http://localhost:5000/api/game/start', {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/game/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
        body: JSON.stringify({ 

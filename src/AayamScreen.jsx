@@ -24,7 +24,7 @@ export default function AayamScreen({
   // LEADERBOARD & SSE LIVE STATE
   useEffect(() => {
     if (!roundId) return;
-    const eventSource = new EventSource(`http://localhost:5000/api/events/${roundId}`);
+    const eventSource = new EventSource(`${import.meta.env.VITE_API_URL}/api/events/${roundId}`);
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'STATE_UPDATE') {
@@ -77,7 +77,7 @@ export default function AayamScreen({
   const syncScoreToServer = async (gameType, payload) => {
     if (!player) return;
     try {
-      await fetch(`http://localhost:5000/api/game/${roundId}/submit`, {
+      await fetch(`${import.meta.env.VITE_API_URL}/api/game/${roundId}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rollNumber: player.rollNumber, gameType, payload }),

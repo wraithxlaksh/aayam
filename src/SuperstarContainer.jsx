@@ -29,7 +29,7 @@ const SuperstarContainer = () => {
         }
         
         try {
-          const res = await fetch('http://localhost:5000/api/auth/verify', {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/verify`, {
             headers: { 'Authorization': `Bearer ${playerData.token}` }
           });
           if (res.ok) {

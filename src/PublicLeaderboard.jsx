@@ -7,7 +7,7 @@ const PublicLeaderboard = () => {
   useEffect(() => {
     const fetchLeaderboard = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/leaderboard');
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/leaderboard`);
         if (res.ok) {
           const data = await res.json();
           setLeaderboard(data);
