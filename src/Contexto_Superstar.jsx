@@ -131,7 +131,7 @@ const [solution, setSolution] = useState('');
        body: JSON.stringify({ 
   rollNumber, 
   gameId, 
-  progress: { guesses, won, timeout, wordsList } 
+  progress: { guesses, won, timeout, wordsList,solution } 
 })
       });
     } catch (err) {}
@@ -143,9 +143,11 @@ const [solution, setSolution] = useState('');
   }, []);
 
   
-  useEffect(() => {
-  const randomWord = ALL_WORDS[Math.floor(Math.random() * ALL_WORDS.length)];
-  setSolution(randomWord);
+useEffect(() => {
+  if (!solution) {
+    const randomWord = ALL_WORDS[Math.floor(Math.random() * ALL_WORDS.length)];
+    setSolution(randomWord);
+  }
 
   setGuesses([]);
   setWon(false);
@@ -236,7 +238,7 @@ const getRank = (guess) => {
             type="text" 
             value={guess}
             onChange={(e) => setGuess(e.target.value)}
-            disabled={won || timeLeft <= 0 || timeout || wordsList?.length === 0}
+          disabled={won || timeLeft <= 0 || timeout || !solution}
             placeholder={won ? "Mission Completed" : (timeout ? "Terminal Locked" : "Enter keyword...")}
             className="w-full bg-slate-900 border border-white/5 rounded-2xl py-4 pl-5 pr-14 text-sm font-medium focus:border-indigo-500/50 outline-none transition-all disabled:opacity-50"
           />
